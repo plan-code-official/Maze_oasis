@@ -6,13 +6,32 @@ import { ErrorScreen } from './components/ErrorScreen';
 import { QUESTIONS, type Question } from './data/questions';
 import { gameAudio } from './utils/audio';
 import { handleExitSite } from './utils/navigation';
-import celebrationRobots from './Celebration/assets/celbr.png';
-import panelArt from './assets/results-panel-empty.png';
-import celebrationTitle from './ResultsPanel/assets/good.png';
-import exitButtonImage from './assets/Exit.png';
-import retryButtonImage from './assets/Retry.png';
  
 type ViewType = 'welcome' | 'playing' | 'gameover' | 'victory';
+
+const requestMobileGameplayPresentation = () => {
+  if (!window.matchMedia('(any-pointer: coarse) and (max-width: 1024px)').matches) return;
+
+  const enterPresentationMode = async () => {
+    if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+      try {
+        await document.documentElement.requestFullscreen();
+      } catch (error) {
+        console.info('Fullscreen is unavailable; continuing with the browser viewport.', error);
+      }
+    }
+
+    if (screen.orientation && typeof screen.orientation.lock === 'function') {
+      try {
+        await screen.orientation.lock('landscape');
+      } catch (error) {
+        console.info('Landscape orientation lock is unavailable; the game remains playable.', error);
+      }
+    }
+  };
+
+  void enterPresentationMode();
+};
 
 function normalizeOptionArray(value: unknown): any[] {
   if (Array.isArray(value)) return value;
@@ -49,23 +68,6 @@ function App() {
 
   // Session State
   const [sessionId, setSessionId] = useState<string | null>(null);
-
-  // Preload Celebration, Results Panel, and Question assets upfront
-  useEffect(() => {
-    const assets = [
-      celebrationRobots,
-      panelArt,
-      celebrationTitle,
-      exitButtonImage,
-      retryButtonImage,
-    ];
-    assets.forEach((src) => {
-      if (src) {
-        const img = new Image();
-        img.src = src;
-      }
-    });
-  }, []);
 
   useEffect(() => {
     if (apiQuestions.length > 0) {
@@ -165,6 +167,7 @@ function App() {
   const [victoryData, setVictoryData] = useState<any>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const isSubmittingRef = useRef(false);
+  const submissionIdRef = useRef(0);
   const [isRestarting, setIsRestarting] = useState(false);
 
   useEffect(() => {
@@ -307,6 +310,8 @@ function App() {
   }, []);
 
   const handleStartGame = () => {
+    requestMobileGameplayPresentation();
+    submissionIdRef.current += 1;
     setScore(0);
     setLives(3);
     setCurrentQuestionIndex(0);
@@ -349,9 +354,10 @@ function App() {
     setIsRestarting(false);
   };
 
-  const submitGameSession = async (finalAnswers: any[]) => {
+  const submitGameSession = async (finalAnswers: any[], showResultsImmediately = false) => {
     if (isSubmittingRef.current) return;
     isSubmittingRef.current = true;
+    const submissionId = ++submissionIdRef.current;
 
     // Ensure every question that was not solved is calculated as wrong too
     const answeredQIds = new Set(finalAnswers.map((a: any) => a.questionId));
@@ -388,6 +394,7 @@ function App() {
       return;
     }
 
+    if (showResultsImmediately) setView('victory');
     setIsSubmitting(true);
 
     try {
@@ -410,22 +417,25 @@ function App() {
 
       if (completeRes.ok) {
         const cData = await completeRes.json();
-        if (cData?.data) {
+        if (cData?.data && submissionIdRef.current === submissionId) {
           setVictoryData(cData.data);
         }
       }
     } catch (e) {
       console.error("Error submitting session:", e);
     } finally {
-      setIsSubmitting(false);
-      isSubmittingRef.current = false;
-      setView('victory');
+      if (submissionIdRef.current === submissionId) {
+        setIsSubmitting(false);
+        isSubmittingRef.current = false;
+        if (!showResultsImmediately) setView('victory');
+      }
     }
   };
 
   const handleCorrectAnswer = () => {
     const timeTaken = Math.max(1, Math.floor((Date.now() - questionStartTime) / 1000));
     const currentQ = apiQuestions[currentQuestionIndex];
+    if (!currentQ || answersRef.current.some((answer) => answer.questionId === currentQ.id && answer.isCorrect)) return;
 
     const answerRecord = {
       questionId: currentQ.id,
@@ -443,7 +453,7 @@ function App() {
       setCurrentQuestionIndex(currentQuestionIndex + 1);
       setQuestionStartTime(Date.now());
     } else {
-      submitGameSession(newAnswers);
+      submitGameSession(newAnswers, true);
     }
 
     setScore((prev) => prev + 10);
@@ -485,7 +495,7 @@ function App() {
 
   if (isLoading) {
     return (
-      <div className="w-screen min-h-screen bg-slate-900 flex items-center justify-center text-white text-2xl font-bold" dir="rtl">
+      <div className="game-loading w-screen min-h-screen flex items-center justify-center text-2xl font-bold" dir="rtl">
         تحميل
       </div>
     );
@@ -516,7 +526,7 @@ function App() {
         />
       )}
 
-      {isSubmitting && (
+      {isSubmitting && view !== 'victory' && (
         <div className="submitting-overlay" aria-busy="true">
           <div className="submitting-spinner" />
         </div>

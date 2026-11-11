@@ -6,9 +6,9 @@
   place-items: center;
   overflow: hidden;
   isolation: isolate;
-  background: rgba(21, 64, 83, 0.77);
-  border: 1px solid #F9FCFC;
-  box-shadow: inset 0px 4px 20.8px 5px #009BB4, 0 0 34px rgba(0, 217, 255, 0.32);
+  background: rgba(248, 233, 203, 0.9);
+  border: 1px solid #c9975b;
+  box-shadow: inset 0 4px 24px rgba(214, 169, 78, 0.24), 0 0 30px rgba(57, 123, 85, 0.2);
   animation: celebrationOverlayIn 360ms ease-out both;
 }
 
@@ -59,13 +59,13 @@
 .celebration-word {
   margin-top: clamp(-24px, -2vh, -10px);
   padding: 0 0.25em;
-  color: #f8ffff;
+  color: #553a26;
   font-family: "Lateef", serif;
   font-size: clamp(4.5rem, 12vw, 10.5rem);
   font-weight: 900;
   letter-spacing: 0.035em;
   line-height: 0.95;
-  text-shadow: 0 0 10px #2ceaff, 0 0 26px rgba(30, 211, 255, 0.9), 0 0 55px rgba(51, 234, 99, 0.62), 0 6px 0 rgba(0, 52, 73, 0.65);
+  text-shadow: 0 2px 0 rgba(248, 233, 203, 0.9), 0 5px 16px rgba(128, 83, 52, 0.28);
   opacity: 0;
   transform: translateY(30px) scale(0.58);
   animation: celebrationWordIn 830ms 1050ms cubic-bezier(0.18, 1.35, 0.38, 1) forwards;

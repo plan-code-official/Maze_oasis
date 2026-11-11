@@ -1,9 +1,7 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { Volume2, Music, Target } from 'lucide-react';
+import { DoorOpen, Volume2, Music, Target, Smartphone, RotateCw } from 'lucide-react';
 import { MazeCanvas } from './MazeCanvas';
 import type { Question } from '../data/questions';
-import ExitButton from '../assets/ExitButton.svg';
-import coinImage from '../assets/daddcoin.webp';
 import heartImage from '../assets/heart.png';
 
 interface GameScreenProps {
@@ -17,10 +15,11 @@ interface GameScreenProps {
   onBackToWelcome: () => void;
 }
 
+const MOBILE_PORTRAIT_QUERY = '(any-pointer: coarse) and (orientation: portrait) and (max-width: 600px)';
+
 export const GameScreen: React.FC<GameScreenProps> = ({
   questions,
   currentQuestionIndex,
-  coins,
   lives,
   onCorrectAnswer,
   onWrongAnswer,
@@ -44,6 +43,22 @@ export const GameScreen: React.FC<GameScreenProps> = ({
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
+  const [isMobilePortrait, setIsMobilePortrait] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia(MOBILE_PORTRAIT_QUERY).matches
+  );
+  const [continueInPortrait, setContinueInPortrait] = useState(false);
+
+  useEffect(() => {
+    const portraitQuery = window.matchMedia(MOBILE_PORTRAIT_QUERY);
+    const updateOrientation = () => {
+      setIsMobilePortrait(portraitQuery.matches);
+      if (!portraitQuery.matches) setContinueInPortrait(false);
+    };
+
+    updateOrientation();
+    portraitQuery.addEventListener('change', updateOrientation);
+    return () => portraitQuery.removeEventListener('change', updateOrientation);
+  }, []);
 
   // Auto-fit: grow question text to the largest size that still fits its box.
   const questionTextRef = useRef<HTMLDivElement | null>(null);
@@ -175,17 +190,13 @@ export const GameScreen: React.FC<GameScreenProps> = ({
                 {Array.from({ length: 3 }, (_, index) => <img key={index} src={heartImage} alt="" className={index < lives ? 'is-active' : 'is-inactive'} />)}
               </div>
             </div>
-            <div className="maze-header__coins" aria-label={`النقاط: ${coins}`}>
-              <img src={coinImage} alt="" />
-              <strong>{coins}</strong>
-            </div>
           </div>
           <div className="maze-header__question" dir="rtl">
             <span>السؤال</span>
             <strong dir="ltr">{Math.min(currentQuestionIndex + 1, questions.length)}/{questions.length}</strong>
           </div>
           <button className="maze-header__exit" type="button" onClick={onBackToWelcome} aria-label="خروج إلى الرئيسية">
-            <img src={ExitButton} alt="" />
+            <DoorOpen aria-hidden="true" />
           </button>
         </div>
         <div className="maze-header__progress" role="progressbar" aria-valuemin={0} aria-valuemax={questions.length} aria-valuenow={currentQuestionIndex}>
@@ -279,7 +290,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({
             onWrong={handleWrong}
             onLoseLife={onLoseLife}
             lives={lives}
-            isPaused={Boolean(zoomedImage) || isTabHidden}
+            isPaused={Boolean(zoomedImage) || isTabHidden || (isMobilePortrait && !continueInPortrait)}
             externalDirection={extDir}
           />
         </div>
@@ -291,6 +302,22 @@ export const GameScreen: React.FC<GameScreenProps> = ({
           <div className="question-image-modal__content" onClick={(event) => event.stopPropagation()}>
             <button type="button" className="question-image-modal__close" onClick={() => setZoomedImage(null)} aria-label="إغلاق الصورة">×</button>
             <img src={zoomedImage} alt="صورة السؤال مكبرة" />
+          </div>
+        </div>
+      )}
+
+      {isMobilePortrait && !continueInPortrait && (
+        <div className="mobile-orientation-guide" role="dialog" aria-modal="true" aria-labelledby="orientation-guide-title" dir="rtl">
+          <div className="mobile-orientation-guide__card">
+            <div className="mobile-orientation-guide__icon" aria-hidden="true">
+              <Smartphone />
+              <RotateCw />
+            </div>
+            <h2 id="orientation-guide-title">أدر هاتفك أفقياً</h2>
+            <p>اللعبة أوضح وأسهل في الوضع الأفقي.</p>
+            <button type="button" onClick={() => setContinueInPortrait(true)}>
+              المتابعة في الوضع الرأسي
+            </button>
           </div>
         </div>
       )}

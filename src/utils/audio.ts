@@ -1,12 +1,34 @@
 // Web Audio API Synthesizer for Game Sound Effects
 import portalSoundUrl from '../assets/sound1.mp3';
+import sandFootstepUrl from '../../assets/sand.mp3';
 
 class AudioSynth {
   private ctx: AudioContext | null = null;
   private portalSound = new Audio(portalSoundUrl);
+  private footstepSound = new Audio(sandFootstepUrl);
+  private footstepRequested = false;
 
   constructor() {
     this.portalSound.preload = 'auto';
+    this.footstepSound.preload = 'auto';
+    this.footstepSound.volume = 0.28;
+    this.footstepSound.loop = true;
+  }
+
+  playFootstep() {
+    if (this.footstepRequested || (!this.footstepSound.paused && !this.footstepSound.ended)) return;
+    this.footstepRequested = true;
+    this.footstepSound.currentTime = 0;
+    void this.footstepSound.play().catch((error: unknown) => {
+      console.warn('Footstep audio failed', error);
+    });
+  }
+
+  stopFootsteps() {
+    if (!this.footstepRequested && this.footstepSound.paused) return;
+    this.footstepRequested = false;
+    this.footstepSound.pause();
+    this.footstepSound.currentTime = 0;
   }
 
   private initCtx() {

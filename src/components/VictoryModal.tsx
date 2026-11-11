@@ -1,5 +1,4 @@
-import React, { useState, useEffect } from 'react';
-import Celebration from '../Celebration/Celebration';
+import React from 'react';
 import ResultsPanel from '../ResultsPanel/ResultsPanel';
 import { gameAudio } from '../utils/audio';
 
@@ -22,13 +21,6 @@ export const VictoryModal: React.FC<VictoryModalProps> = ({
   onRestart,
   onHome,
 }) => {
-  const [showCelebration, setShowCelebration] = useState(() => {
-    if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('view') === 'victory') {
-      return false;
-    }
-    return totalQuestions > 0 && correctAnswers / totalQuestions >= 0.5;
-  });
-
   const handleRestart = () => {
     gameAudio.playCorrect();
     onRestart();
@@ -39,19 +31,6 @@ export const VictoryModal: React.FC<VictoryModalProps> = ({
     onHome();
   };
 
-  if (showCelebration) {
-    // Show celebration and wait for it to finish
-    return (
-      <div className="fixed inset-0 z-50 pointer-events-none">
-        <Celebration
-          isVisible={true}
-          onComplete={() => setShowCelebration(false)}
-        />
-      </div>
-    );
-  }
-
-  // After celebration (or if skipped), show ResultsPanel
   const finalScore = victoryData?.score ?? score;
   const totalScore = totalQuestions * 10;
   // Ensure any question that was not solved is also counted as wrong

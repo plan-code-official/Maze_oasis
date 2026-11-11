@@ -1,9 +1,43 @@
 import React, { useEffect, useRef, useMemo } from 'react';
 import { gameAudio } from '../utils/audio';
-import robotImg from '../assets/robot.png';
-import robotSideImg from '../assets/robot-side.png';
-import robotUpImg from '../assets/robot-up.png';
-import robotDownImg from '../assets/robot-down.png';
+import character11 from '../../assets/11.png';
+import character12 from '../../assets/12.png';
+import character13 from '../../assets/13.png';
+import character14 from '../../assets/14.png';
+import character21 from '../../assets/21.png';
+import character22 from '../../assets/22.png';
+import character23 from '../../assets/23.png';
+import character24 from '../../assets/24.png';
+import character31 from '../../assets/31.png';
+import character32 from '../../assets/32.png';
+import character33 from '../../assets/33.png';
+import character34 from '../../assets/34.png';
+
+type FacingDirection = 'up' | 'down' | 'left' | 'right';
+
+const CHARACTER_FRAMES: Record<FacingDirection, [string, string, string]> = {
+  down: [character11, character21, character31],
+  right: [character12, character22, character32],
+  up: [character13, character23, character33],
+  left: [character14, character24, character34]
+};
+
+const CHARACTER_ALPHA_BOUNDS: Record<string, [number, number, number, number]> = {
+  [character11]: [14, 0, 422, 956],
+  [character12]: [53, 14, 366, 959],
+  [character13]: [0, 15, 432, 909],
+  [character14]: [24, 0, 385, 957],
+  [character21]: [33, 19, 432, 947],
+  [character22]: [0, 2, 398, 962],
+  [character23]: [14, 0, 432, 957],
+  [character24]: [0, 3, 429, 957],
+  [character31]: [11, 0, 419, 963],
+  [character32]: [3, 3, 432, 957],
+  [character33]: [20, 6, 423, 957],
+  [character34]: [9, 1, 388, 963]
+};
+
+const WALK_FRAME_DURATION = 125;
 
 // 19x19 Maze Grid Layout (1 = Wall, 0 = Path)
 const MAZE_GRID = [
@@ -30,8 +64,8 @@ const MAZE_GRID = [
 
 // Warp Portals (Top <-> Bottom)
 const WARP_PORTALS = [
-  { x: 9, y: 0, targetX: 9, targetY: 17, exitDir: 'up', color: '#00f0ff' },
-  { x: 9, y: 18, targetX: 9, targetY: 1, exitDir: 'down', color: '#ff007f' }
+  { x: 9, y: 0, targetX: 9, targetY: 17, exitDir: 'up', color: '#39a99c' },
+  { x: 9, y: 18, targetX: 9, targetY: 1, exitDir: 'down', color: '#d89a4e' }
 ];
 
 // Full-width maze metrics: 19 cells * 32px = 608px world width
@@ -39,14 +73,41 @@ const CELL_SIZE = 32;
 const MAZE_TILES_COUNT = 19;
 const MAZE_WORLD_SIZE = MAZE_TILES_COUNT * CELL_SIZE; // 608px
 const MAZE_VIEW_PERCENTAGE = 0.85; // 85% zoom view
+const MOBILE_LANDSCAPE_MIN_VISIBLE_ROWS = 9;
+const MOBILE_PORTRAIT_QUERY = '((any-pointer: coarse) or (max-width: 600px)) and (orientation: portrait) and (max-width: 800px) and (max-height: 1100px)';
+const MOBILE_LANDSCAPE_QUERY = '((any-pointer: coarse) or (max-width: 767px)) and (orientation: landscape) and (max-width: 980px) and (max-height: 600px) and (min-aspect-ratio: 3/2)';
 const PLAYER_MOVE_SPEED = 1.25;
 const ENEMY_SPEED_REMAINING_RATIO = 0.7;
+const isMobileLandscapeViewport = () =>
+  typeof window !== 'undefined' && window.matchMedia(MOBILE_LANDSCAPE_QUERY).matches;
+const isMobilePortraitViewport = () =>
+  typeof window !== 'undefined' && window.matchMedia(MOBILE_PORTRAIT_QUERY).matches;
+
+const getLandscapeZoom = (availableWidth: number, availableHeight: number) => {
+  const aspectRatio = window.innerWidth / window.innerHeight;
+  const magnification = Math.min(1.22, Math.max(1.15, 1.15 + (aspectRatio - 1.6) * 0.08));
+  const widthBasedZoom = (availableWidth / MAZE_WORLD_SIZE) * MAZE_VIEW_PERCENTAGE * magnification;
+  const heightBasedZoom = availableHeight / (CELL_SIZE * MOBILE_LANDSCAPE_MIN_VISIBLE_ROWS);
+  return Math.min(widthBasedZoom, heightBasedZoom);
+};
+
+const getPortraitZoom = (availableWidth: number, availableHeight: number) => {
+  const visibleColumns = Math.min(11.5, Math.max(9.25, 9.25 + (availableWidth - 320) * 0.012));
+  const widthBasedZoom = availableWidth / (CELL_SIZE * visibleColumns);
+  const heightBasedZoom = availableHeight / (CELL_SIZE * 9.5);
+  return Math.min(widthBasedZoom, heightBasedZoom);
+};
+
 const computeInitialMazeZoom = () => {
   if (typeof window !== 'undefined') {
     const estWidth = window.innerWidth >= 1024
       ? Math.min(1920, window.innerWidth) - 380
       : window.innerWidth - 32;
-    const zoom = (estWidth / MAZE_WORLD_SIZE) * MAZE_VIEW_PERCENTAGE;
+    const zoom = isMobilePortraitViewport()
+      ? getPortraitZoom(window.innerWidth - 16, window.innerHeight)
+      : isMobileLandscapeViewport()
+        ? getLandscapeZoom(estWidth, window.innerHeight)
+        : (estWidth / MAZE_WORLD_SIZE) * MAZE_VIEW_PERCENTAGE;
     return { zoomX: zoom, zoomY: zoom };
   }
   return { zoomX: 1.33 * MAZE_VIEW_PERCENTAGE, zoomY: 1.33 * MAZE_VIEW_PERCENTAGE };
@@ -54,13 +115,43 @@ const computeInitialMazeZoom = () => {
 
 // Room Centers & Colors
 const ROOMS = [
-  { id: 0, x: 2, y: 2, label: 'أعلى اليسار', color: '#00f0ff', glow: 'rgba(0, 240, 255, 0.12)' }, // TL
-  { id: 1, x: 16, y: 2, label: 'أعلى اليمين', color: '#00f0ff', glow: 'rgba(0, 240, 255, 0.12)' }, // TR
-  { id: 2, x: 2, y: 16, label: 'أسفل اليسار', color: '#00f0ff', glow: 'rgba(0, 240, 255, 0.12)' }, // BL
-  { id: 3, x: 16, y: 16, label: 'أسفل اليمين', color: '#00f0ff', glow: 'rgba(0, 240, 255, 0.12)' } // BR
+  { id: 0, x: 2, y: 2, label: 'أعلى اليسار', color: '#c79450', glow: 'rgba(247, 213, 138, 0.28)' }, // TL
+  { id: 1, x: 16, y: 2, label: 'أعلى اليمين', color: '#c79450', glow: 'rgba(247, 213, 138, 0.28)' }, // TR
+  { id: 2, x: 2, y: 16, label: 'أسفل اليسار', color: '#c79450', glow: 'rgba(247, 213, 138, 0.28)' }, // BL
+  { id: 3, x: 16, y: 16, label: 'أسفل اليمين', color: '#c79450', glow: 'rgba(247, 213, 138, 0.28)' } // BR
 ];
 
+const DESERT_PALMS = [
+  { x: 7, y: 3, scale: 1 },
+  { x: 11, y: 3, scale: 0.82 },
+  { x: 2, y: 9, scale: 0.78 },
+  { x: 16, y: 9, scale: 0.92 },
+  { x: 7, y: 15, scale: 0.86 },
+  { x: 11, y: 15, scale: 1 }
+];
 
+const DESERT_DETAILS = [
+  { x: 1, y: 5, kind: 'rocks' },
+  { x: 17, y: 5, kind: 'shrub' },
+  { x: 3, y: 7, kind: 'water' },
+  { x: 15, y: 7, kind: 'rocks' },
+  { x: 1, y: 11, kind: 'shrub' },
+  { x: 17, y: 11, kind: 'water' },
+  { x: 3, y: 11, kind: 'rocks' },
+  { x: 15, y: 11, kind: 'shrub' },
+  { x: 1, y: 13, kind: 'water' },
+  { x: 17, y: 13, kind: 'rocks' }
+] as const;
+
+const ENEMY_SPAWNS = [{ x: 5, y: 5 }, { x: 13, y: 5 }, { x: 5, y: 13 }];
+
+const isSafeDecorationCell = (x: number, y: number) => (
+  MAZE_GRID[y]?.[x] === 0
+  && !ROOMS.some((room) => Math.abs(x - room.x) <= 1 && Math.abs(y - room.y) <= 1)
+  && !WARP_PORTALS.some((portal) => portal.x === x && portal.y === y)
+  && !ENEMY_SPAWNS.some((spawn) => Math.abs(x - spawn.x) <= 1 && Math.abs(y - spawn.y) <= 1)
+  && (Math.abs(x - 9) > 1 || Math.abs(y - 9) > 1)
+);
 
 interface Monster {
   x: number;
@@ -107,27 +198,16 @@ export const MazeCanvas: React.FC<MazeCanvasProps> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  const robotImageRef = useRef<HTMLImageElement | null>(null);
-  const robotSideRef = useRef<HTMLImageElement | null>(null);
-  const robotUpRef = useRef<HTMLImageElement | null>(null);
-  const robotDownRef = useRef<HTMLImageElement | null>(null);
+  const characterImagesRef = useRef<Record<string, HTMLImageElement>>({});
 
   useEffect(() => {
-    const img = new Image();
-    img.src = robotImg;
-    img.onload = () => robotImageRef.current = img;
-
-    const sideImg = new Image();
-    sideImg.src = robotSideImg;
-    sideImg.onload = () => robotSideRef.current = sideImg;
-
-    const upImg = new Image();
-    upImg.src = robotUpImg;
-    upImg.onload = () => robotUpRef.current = upImg;
-
-    const downImg = new Image();
-    downImg.src = robotDownImg;
-    downImg.onload = () => robotDownRef.current = downImg;
+    Object.values(CHARACTER_FRAMES).flat().forEach((src) => {
+      const image = new Image();
+      image.onload = () => {
+        characterImagesRef.current[src] = image;
+      };
+      image.src = src;
+    });
   }, []);
 
   // Player state
@@ -143,6 +223,9 @@ export const MazeCanvas: React.FC<MazeCanvasProps> = ({
     nextDir: 'none',
     invincibleFrames: 0,
     facingDir: 'left',
+    isMoving: false,
+    walkFrame: 0,
+    lastWalkFrameAt: 0,
   });
 
   // Monsters state
@@ -155,13 +238,23 @@ export const MazeCanvas: React.FC<MazeCanvasProps> = ({
   // Local state for wrong room cooldowns to prevent double triggers
   const lastRoomVisitedRef = useRef<{ id: number; time: number } | null>(null);
   const initialZoom = computeInitialMazeZoom();
-  const gameplayZoomRef = useRef(initialZoom);
   const cameraRef = useRef({ x: 9 * 32 + 16, y: 9 * 32 + 16, zoomX: initialZoom.zoomX, zoomY: initialZoom.zoomY });
-  const celebrationRef = useRef<{ active: boolean, progress: number } | null>(null);
   const frameCountRef = useRef(0);
   const lowPowerDeviceRef = useRef(false);
+  const mobilePortraitRef = useRef(isMobilePortraitViewport());
 
   const pauseStartRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const portraitQuery = window.matchMedia(MOBILE_PORTRAIT_QUERY);
+    const updatePortraitMode = () => {
+      mobilePortraitRef.current = portraitQuery.matches;
+    };
+
+    updatePortraitMode();
+    portraitQuery.addEventListener('change', updatePortraitMode);
+    return () => portraitQuery.removeEventListener('change', updatePortraitMode);
+  }, []);
 
   useEffect(() => {
     lowPowerDeviceRef.current = window.matchMedia(
@@ -180,6 +273,17 @@ export const MazeCanvas: React.FC<MazeCanvasProps> = ({
       pauseStartRef.current = null;
     }
   }, [isPaused]);
+
+  useEffect(() => {
+    if (isPaused || lives <= 0) {
+      const player = playerRef.current;
+      player.isMoving = false;
+      player.walkFrame = 0;
+      gameAudio.stopFootsteps();
+    }
+
+    return () => gameAudio.stopFootsteps();
+  }, [isPaused, lives]);
 
   // BFS pathfinding — returns the first direction to move toward target
   const bfsFirstStep = (
@@ -251,11 +355,15 @@ export const MazeCanvas: React.FC<MazeCanvasProps> = ({
     bgCanvas.width = 19 * cellSize;
     bgCanvas.height = 19 * cellSize;
 
-    bCtx.fillStyle = '#020617';
+    const sandGradient = bCtx.createLinearGradient(0, 0, bgCanvas.width, bgCanvas.height);
+    sandGradient.addColorStop(0, '#f0d7a1');
+    sandGradient.addColorStop(0.52, '#e8c994');
+    sandGradient.addColorStop(1, '#ddb77d');
+    bCtx.fillStyle = sandGradient;
     bCtx.fillRect(0, 0, bgCanvas.width, bgCanvas.height);
 
-    // 0.5 Draw Sci-Fi Floor Grid
-    bCtx.strokeStyle = 'rgba(255, 150, 0, 0.15)';
+    // Subtle sand tiles and scattered grains keep paths distinct without clutter.
+    bCtx.strokeStyle = 'rgba(145, 98, 61, 0.18)';
     bCtx.lineWidth = 1;
     for (let i = 0; i <= 19; i++) {
       bCtx.beginPath();
@@ -269,33 +377,54 @@ export const MazeCanvas: React.FC<MazeCanvasProps> = ({
       bCtx.stroke();
     }
 
-    bCtx.fillStyle = 'rgba(255, 150, 0, 0.8)';
-    bCtx.shadowColor = '#ff9600';
-    bCtx.shadowBlur = 4;
-    for (let r = 0; r <= 19; r++) {
-      for (let c = 0; c <= 19; c++) {
-        bCtx.beginPath();
-        bCtx.arc(c * cellSize, r * cellSize, 1.5, 0, Math.PI * 2);
-        bCtx.fill();
+    for (let r = 0; r < 19; r++) {
+      for (let c = 0; c < 19; c++) {
+        if (MAZE_GRID[r][c] === 0 && (r * 17 + c * 11) % 4 === 0) {
+          const grainX = c * cellSize + 6 + ((r * 7 + c * 3) % 19);
+          const grainY = r * cellSize + 5 + ((r * 5 + c * 13) % 20);
+          bCtx.fillStyle = 'rgba(255, 247, 220, 0.42)';
+          bCtx.fillRect(grainX, grainY, 2, 1);
+          bCtx.fillStyle = 'rgba(145, 98, 61, 0.12)';
+          bCtx.fillRect(grainX + 5, grainY + 4, 1, 1);
+        }
       }
     }
-    bCtx.shadowBlur = 0;
 
-    // 1. Draw Room Glow zones
+    // Warm courtyard paving replaces the former neon room highlights.
     ROOMS.forEach((room) => {
       bCtx.fillStyle = room.glow;
       bCtx.fillRect((room.x - 1) * cellSize, (room.y - 1) * cellSize, cellSize * 3, cellSize * 3);
 
-      // Neon Room Borders
       bCtx.strokeStyle = room.color;
-      bCtx.lineWidth = 2;
-      bCtx.shadowColor = room.color;
-      bCtx.shadowBlur = 10;
+      bCtx.lineWidth = 1.5;
       bCtx.strokeRect((room.x - 1) * cellSize, (room.y - 1) * cellSize, cellSize * 3, cellSize * 3);
-    });
-    bCtx.shadowBlur = 0; // Reset shadows
 
-    // 2. Draw Maze Walls
+    });
+
+    // The existing warp tiles are styled as small oasis wells.
+    WARP_PORTALS.forEach((portal) => {
+      const x = portal.x * cellSize + cellSize / 2;
+      const y = portal.y * cellSize + cellSize / 2;
+      bCtx.fillStyle = '#91623d';
+      bCtx.beginPath();
+      bCtx.arc(x, y, 13, 0, Math.PI * 2);
+      bCtx.fill();
+      bCtx.fillStyle = '#c8955d';
+      bCtx.beginPath();
+      bCtx.arc(x, y, 10, 0, Math.PI * 2);
+      bCtx.fill();
+      bCtx.fillStyle = '#43b9b2';
+      bCtx.beginPath();
+      bCtx.arc(x, y, 7, 0, Math.PI * 2);
+      bCtx.fill();
+      bCtx.strokeStyle = 'rgba(248, 233, 203, 0.75)';
+      bCtx.lineWidth = 1;
+      bCtx.beginPath();
+      bCtx.arc(x, y, 4, 0, Math.PI * 2);
+      bCtx.stroke();
+    });
+
+    // Sandstone blocks retain the existing maze geometry and collision grid.
     for (let r = 0; r < 19; r++) {
       for (let c = 0; c < 19; c++) {
         let isWall = MAZE_GRID[r][c] === 1;
@@ -309,47 +438,122 @@ export const MazeCanvas: React.FC<MazeCanvasProps> = ({
           const x = c * cellSize;
           const y = r * cellSize;
 
-          // Base wall (dark blue metallic)
-          bCtx.fillStyle = '#0a192f';
+          bCtx.fillStyle = '#91623d';
           bCtx.fillRect(x, y, cellSize, cellSize);
-
-          // Inner raised panel
-          bCtx.fillStyle = '#112240';
-          bCtx.fillRect(x + 3, y + 3, cellSize - 6, cellSize - 6);
-
-          // Sci-fi borders
-          bCtx.strokeStyle = '#1e3a8a';
+          bCtx.fillStyle = ((r + c) % 2 === 0) ? '#c8955d' : '#c18a52';
+          bCtx.fillRect(x + 2, y + 2, cellSize - 4, cellSize - 4);
+          bCtx.fillStyle = '#e5bc7e';
+          bCtx.fillRect(x + 3, y + 3, cellSize - 6, 3);
+          bCtx.fillStyle = 'rgba(116, 72, 39, 0.28)';
+          bCtx.fillRect(x + 3, y + cellSize - 4, cellSize - 6, 2);
+          bCtx.strokeStyle = 'rgba(112, 73, 43, 0.5)';
           bCtx.lineWidth = 1;
-          bCtx.strokeRect(x, y, cellSize, cellSize);
+          bCtx.strokeRect(x + 1.5, y + 1.5, cellSize - 3, cellSize - 3);
 
-          // Neon blue corner highlights
-          bCtx.strokeStyle = '#00f0ff';
-          bCtx.shadowColor = '#00f0ff';
-          bCtx.shadowBlur = 5;
-
-          bCtx.beginPath();
-          bCtx.moveTo(x + 6, y + 1);
-          bCtx.lineTo(x + 1, y + 1);
-          bCtx.lineTo(x + 1, y + 6);
-          bCtx.stroke();
-
-          bCtx.beginPath();
-          bCtx.moveTo(x + cellSize - 6, y + cellSize - 1);
-          bCtx.lineTo(x + cellSize - 1, y + cellSize - 1);
-          bCtx.lineTo(x + cellSize - 1, y + cellSize - 6);
-          bCtx.stroke();
-
-          // Occasional bright neon accents on panels
-          if ((r * 13 + c * 7) % 11 === 0) {
-            bCtx.shadowBlur = 8;
-            bCtx.fillStyle = '#00f0ff';
-            bCtx.fillRect(x + cellSize / 2 - 3, y + 3, 6, 2);
+          if ((r * 13 + c * 7) % 5 === 0) {
+            bCtx.fillStyle = 'rgba(248, 233, 203, 0.38)';
+            bCtx.fillRect(x + 7 + ((r + c) % 9), y + 12 + ((r * 3 + c) % 7), 5, 1);
+            bCtx.fillStyle = 'rgba(116, 72, 39, 0.2)';
+            bCtx.fillRect(x + 17 + ((r * 5 + c) % 5), y + 20, 3, 1);
           }
-
-          bCtx.shadowBlur = 0; // Reset
         }
       }
     }
+
+    DESERT_PALMS.forEach(({ x, y, scale }) => {
+      if (!isSafeDecorationCell(x, y)) return;
+      const palmX = x * cellSize + cellSize / 2;
+      const palmY = y * cellSize + cellSize / 2;
+      const canopySize = 9 * scale;
+
+      bCtx.fillStyle = 'rgba(92, 63, 35, 0.2)';
+      bCtx.beginPath();
+      bCtx.ellipse(palmX + 3, palmY + 5, canopySize * 0.9, canopySize * 0.55, -0.3, 0, Math.PI * 2);
+      bCtx.fill();
+
+      bCtx.fillStyle = '#8a5b35';
+      bCtx.beginPath();
+      bCtx.ellipse(palmX, palmY + 2, 3 * scale, 4 * scale, -0.25, 0, Math.PI * 2);
+      bCtx.fill();
+      bCtx.fillStyle = '#c9975b';
+      bCtx.beginPath();
+      bCtx.ellipse(palmX - 0.8, palmY + 1, 1.2 * scale, 3.2 * scale, -0.25, 0, Math.PI * 2);
+      bCtx.fill();
+
+      for (let leaf = 0; leaf < 8; leaf++) {
+        const angle = -Math.PI / 2 + leaf * Math.PI / 4;
+        const length = canopySize * (leaf % 2 === 0 ? 1 : 0.78);
+        const tipX = palmX + Math.cos(angle) * length;
+        const tipY = palmY + Math.sin(angle) * length * 0.72;
+        const controlX = palmX + Math.cos(angle) * length * 0.62 - Math.sin(angle) * 2.5;
+        const controlY = palmY + Math.sin(angle) * length * 0.5 + Math.cos(angle) * 2.5;
+
+        bCtx.strokeStyle = leaf % 3 === 0 ? '#397b55' : '#286346';
+        bCtx.lineWidth = 2 * scale;
+        bCtx.lineCap = 'round';
+        bCtx.beginPath();
+        bCtx.moveTo(palmX, palmY);
+        bCtx.quadraticCurveTo(controlX, controlY, tipX, tipY);
+        bCtx.stroke();
+        bCtx.strokeStyle = 'rgba(190, 211, 125, 0.78)';
+        bCtx.lineWidth = 0.7;
+        bCtx.beginPath();
+        bCtx.moveTo(palmX + Math.cos(angle) * 3, palmY + Math.sin(angle) * 2);
+        bCtx.lineTo(tipX, tipY);
+        bCtx.stroke();
+      }
+
+      bCtx.fillStyle = '#d6a94e';
+      bCtx.beginPath();
+      bCtx.arc(palmX, palmY, 1.8, 0, Math.PI * 2);
+      bCtx.fill();
+    });
+
+    DESERT_DETAILS.forEach(({ x, y, kind }) => {
+      if (!isSafeDecorationCell(x, y)) return;
+      const detailX = x * cellSize + cellSize / 2;
+      const detailY = y * cellSize + cellSize / 2;
+
+      if (kind === 'water') {
+        bCtx.fillStyle = 'rgba(92, 63, 35, 0.16)';
+        bCtx.beginPath();
+        bCtx.ellipse(detailX + 1, detailY + 2, 7, 4.5, -0.2, 0, Math.PI * 2);
+        bCtx.fill();
+        bCtx.fillStyle = '#279fae';
+        bCtx.beginPath();
+        bCtx.ellipse(detailX, detailY, 6, 3.5, -0.2, 0, Math.PI * 2);
+        bCtx.fill();
+        bCtx.strokeStyle = 'rgba(248, 233, 203, 0.8)';
+        bCtx.lineWidth = 1;
+        bCtx.beginPath();
+        bCtx.ellipse(detailX - 1, detailY - 0.5, 2.5, 1, -0.2, 0, Math.PI * 2);
+        bCtx.stroke();
+      } else if (kind === 'rocks') {
+        bCtx.fillStyle = 'rgba(92, 63, 35, 0.18)';
+        bCtx.beginPath();
+        bCtx.ellipse(detailX + 2, detailY + 3, 7, 3.5, 0.15, 0, Math.PI * 2);
+        bCtx.fill();
+        bCtx.fillStyle = '#b98149';
+        bCtx.beginPath();
+        bCtx.ellipse(detailX - 2, detailY, 4.5, 3.5, -0.3, 0, Math.PI * 2);
+        bCtx.ellipse(detailX + 3, detailY + 1, 3, 2.5, 0.2, 0, Math.PI * 2);
+        bCtx.fill();
+        bCtx.fillStyle = '#f3ddb8';
+        bCtx.fillRect(detailX - 3, detailY - 1.5, 3, 1);
+      } else {
+        bCtx.fillStyle = 'rgba(92, 63, 35, 0.16)';
+        bCtx.beginPath();
+        bCtx.ellipse(detailX + 1, detailY + 3, 6, 3, 0, 0, Math.PI * 2);
+        bCtx.fill();
+        bCtx.fillStyle = '#397b55';
+        bCtx.beginPath();
+        bCtx.ellipse(detailX - 2, detailY, 3.2, 2, -0.4, 0, Math.PI * 2);
+        bCtx.ellipse(detailX + 2, detailY - 1, 3.5, 2.2, 0.4, 0, Math.PI * 2);
+        bCtx.fill();
+        bCtx.fillStyle = '#d6a94e';
+        bCtx.fillRect(detailX, detailY - 2, 1, 1);
+      }
+    });
   }, [cagedRooms]);
 
   const activeDPadDirRef = useRef<string | null>(null);
@@ -360,7 +564,11 @@ export const MazeCanvas: React.FC<MazeCanvasProps> = ({
     if (containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect();
       if (rect.width > 0 && rect.height > 0) {
-        const zoom = (rect.width / MAZE_WORLD_SIZE) * MAZE_VIEW_PERCENTAGE;
+        const zoom = isMobilePortraitViewport()
+          ? getPortraitZoom(rect.width, rect.height)
+          : isMobileLandscapeViewport()
+            ? getLandscapeZoom(rect.width, rect.height)
+            : (rect.width / MAZE_WORLD_SIZE) * MAZE_VIEW_PERCENTAGE;
         return { zoomX: zoom, zoomY: zoom };
       }
     }
@@ -368,7 +576,11 @@ export const MazeCanvas: React.FC<MazeCanvasProps> = ({
       const estWidth = window.innerWidth >= 1024
         ? Math.min(1920, window.innerWidth) - 380
         : window.innerWidth - 32;
-      const zoom = (estWidth / MAZE_WORLD_SIZE) * MAZE_VIEW_PERCENTAGE;
+      const zoom = isMobilePortraitViewport()
+        ? getPortraitZoom(window.innerWidth - 16, window.innerHeight)
+        : isMobileLandscapeViewport()
+          ? getLandscapeZoom(estWidth, window.innerHeight)
+          : (estWidth / MAZE_WORLD_SIZE) * MAZE_VIEW_PERCENTAGE;
       return { zoomX: zoom, zoomY: zoom };
     }
     return { zoomX: 1.33 * MAZE_VIEW_PERCENTAGE, zoomY: 1.33 * MAZE_VIEW_PERCENTAGE };
@@ -389,10 +601,12 @@ export const MazeCanvas: React.FC<MazeCanvasProps> = ({
       nextDir: 'none',
       invincibleFrames: 120, // 2 seconds safety on level start
       facingDir: 'left',
+      isMoving: false,
+      walkFrame: 0,
+      lastWalkFrameAt: 0,
     };
 
     const targetZoom = computeMazeZoom();
-    gameplayZoomRef.current = targetZoom;
 
     cameraRef.current = {
       x: 9 * cellSize + cellSize / 2,
@@ -434,7 +648,7 @@ export const MazeCanvas: React.FC<MazeCanvasProps> = ({
         targetX: 5,
         targetY: 5,
         speed: chaserSpeed,
-        color: '#ff0000', // Red: Chaser (Blinky)
+        color: '#b9633e', // Terracotta: Chaser
         personality: 'chaser',
         lastDir: 'none'
       },
@@ -446,7 +660,7 @@ export const MazeCanvas: React.FC<MazeCanvasProps> = ({
         targetX: 13,
         targetY: 5,
         speed: ambusherSpeed,
-        color: '#00f0ff', // Cyan: Ambusher (Inky)
+        color: '#438875', // Oasis green: Ambusher
         personality: 'ambusher',
         lastDir: 'none'
       },
@@ -458,7 +672,7 @@ export const MazeCanvas: React.FC<MazeCanvasProps> = ({
         targetX: 5,
         targetY: 13,
         speed: wandererSpeed,
-        color: '#ffaa00', // Orange: Wanderer (Clyde)
+        color: '#d6a64f', // Sunlit gold: Wanderer
         personality: 'wanderer',
         lastDir: 'none'
       }
@@ -556,7 +770,7 @@ export const MazeCanvas: React.FC<MazeCanvasProps> = ({
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    ctx.imageSmoothingEnabled = false;
+    ctx.imageSmoothingEnabled = true;
 
     const resizeCanvas = () => {
       const bounds = containerRef.current?.getBoundingClientRect();
@@ -570,11 +784,8 @@ export const MazeCanvas: React.FC<MazeCanvasProps> = ({
       if (canvas.height !== nextHeight) canvas.height = nextHeight;
 
       const nextZoom = computeMazeZoom();
-      gameplayZoomRef.current = nextZoom;
-      if (!celebrationRef.current) {
-        cameraRef.current.zoomX = nextZoom.zoomX;
-        cameraRef.current.zoomY = nextZoom.zoomY;
-      }
+      cameraRef.current.zoomX = nextZoom.zoomX;
+      cameraRef.current.zoomY = nextZoom.zoomY;
     };
 
     resizeCanvas();
@@ -589,6 +800,8 @@ export const MazeCanvas: React.FC<MazeCanvasProps> = ({
       if (isPaused || lives <= 0) return;
 
       const player = playerRef.current;
+      const previousX = player.x;
+      const previousY = player.y;
 
       // 1. Move Player
       const targetPx = player.targetX * cellSize + cellSize / 2;
@@ -660,11 +873,56 @@ export const MazeCanvas: React.FC<MazeCanvasProps> = ({
         }
       }
 
+      const moved = player.x !== previousX || player.y !== previousY;
+      const nextTargetPx = player.targetX * cellSize + cellSize / 2;
+      const nextTargetPy = player.targetY * cellSize + cellSize / 2;
+      const targetAhead = player.x !== nextTargetPx || player.y !== nextTargetPy;
+      const movementTime = performance.now();
+
+      if (moved) {
+        if (!player.isMoving) {
+          player.walkFrame = 0;
+          player.lastWalkFrameAt = movementTime;
+        } else if (movementTime - player.lastWalkFrameAt >= WALK_FRAME_DURATION) {
+          const elapsedFrames = Math.floor((movementTime - player.lastWalkFrameAt) / WALK_FRAME_DURATION);
+          player.walkFrame = (player.walkFrame + elapsedFrames) % 2;
+          player.lastWalkFrameAt += elapsedFrames * WALK_FRAME_DURATION;
+        }
+
+        player.isMoving = true;
+        gameAudio.playFootstep();
+      } else if (targetAhead) {
+        if (!player.isMoving) {
+          player.walkFrame = 0;
+          player.lastWalkFrameAt = movementTime;
+        }
+        player.isMoving = true;
+      } else {
+        player.isMoving = false;
+        player.walkFrame = 0;
+        gameAudio.stopFootsteps();
+      }
+
       // Update camera smooth follow with boundary clamping
       const camera = cameraRef.current;
-      const camLerp = 0.1;
-      camera.x += (player.x - camera.x) * camLerp;
-      camera.y += (player.y - camera.y) * camLerp;
+      const isPortraitCamera = mobilePortraitRef.current;
+      const deadZone = isPortraitCamera ? cellSize * 0.75 : 0;
+      const cameraTargetX = isPortraitCamera
+        ? player.x - Math.sign(player.x - camera.x) * Math.min(Math.abs(player.x - camera.x), deadZone)
+        : player.x;
+      const cameraTargetY = isPortraitCamera
+        ? player.y - Math.sign(player.y - camera.y) * Math.min(Math.abs(player.y - camera.y), deadZone)
+        : player.y;
+      const teleported = Math.abs(player.x - previousX) > cellSize || Math.abs(player.y - previousY) > cellSize;
+      const camLerp = isPortraitCamera ? 0.18 : 0.1;
+
+      if (isPortraitCamera && teleported) {
+        camera.x = player.x;
+        camera.y = player.y;
+      } else {
+        camera.x += (cameraTargetX - camera.x) * camLerp;
+        camera.y += (cameraTargetY - camera.y) * camLerp;
+      }
 
       const zoomX = camera.zoomX;
       const zoomY = camera.zoomY;
@@ -855,10 +1113,12 @@ export const MazeCanvas: React.FC<MazeCanvasProps> = ({
           lastRoomVisitedRef.current = { id: room.id, time: now };
 
           if (wordInRoom === correctWord) {
-            if (!celebrationRef.current) {
-              celebrationRef.current = { active: true, progress: 0 };
-              gameAudio.playTeleport(); // Play some sound for success
-            }
+            player.isMoving = false;
+            player.dir = 'none';
+            player.targetX = player.gridX;
+            player.targetY = player.gridY;
+            gameAudio.stopFootsteps();
+            onCorrect();
           } else {
             gameAudio.playWrong();
             onWrong(wordInRoom);
@@ -883,7 +1143,7 @@ export const MazeCanvas: React.FC<MazeCanvasProps> = ({
     };
 
     const drawGame = () => {
-      ctx.fillStyle = '#020617';
+      ctx.fillStyle = '#e8c994';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       ctx.save();
@@ -942,15 +1202,20 @@ export const MazeCanvas: React.FC<MazeCanvasProps> = ({
           // A single rotating arc preserves the portal cue without the expensive
           // gradients and shadowBlur operations that are costly on mobile GPUs.
           ctx.save();
-          ctx.fillStyle = '#050a1f';
+          ctx.fillStyle = '#237f7d';
           ctx.beginPath();
           ctx.arc(px, py, radius, 0, Math.PI * 2);
           ctx.fill();
 
-          ctx.strokeStyle = portal.color;
-          ctx.lineWidth = 2;
+          ctx.strokeStyle = '#e5bc7e';
+          ctx.lineWidth = 4;
           ctx.beginPath();
-          ctx.arc(px, py, radius - 1, baseAngle, baseAngle + Math.PI * 1.35);
+          ctx.arc(px, py, radius - 1, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.strokeStyle = portal.color;
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(px, py, radius - 4, baseAngle, baseAngle + Math.PI * 1.35);
           ctx.stroke();
 
           ctx.globalAlpha = 0.65;
@@ -968,7 +1233,7 @@ export const MazeCanvas: React.FC<MazeCanvasProps> = ({
         ctx.arc(px, py, radius, 0, Math.PI * 2);
         ctx.clip();
 
-        ctx.fillStyle = '#050a1f';
+        ctx.fillStyle = '#237f7d';
         ctx.fillRect(px - radius, py - radius, radius * 2, radius * 2);
 
         for (let layer = 1; layer <= 2; layer++) {
@@ -1005,12 +1270,20 @@ export const MazeCanvas: React.FC<MazeCanvasProps> = ({
         ctx.restore();
 
         ctx.save();
-        ctx.shadowColor = portal.color;
-        ctx.shadowBlur = 10;
-        ctx.strokeStyle = portal.color;
-        ctx.lineWidth = 2;
+        ctx.shadowColor = '#795235';
+        ctx.shadowBlur = 3;
+        ctx.strokeStyle = '#e5bc7e';
+        ctx.lineWidth = 4;
         ctx.beginPath();
         ctx.arc(px, py, radius - 1, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.shadowColor = portal.color;
+        ctx.shadowBlur = 5;
+        ctx.strokeStyle = portal.color;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(px, py, radius - 4, 0, Math.PI * 2);
         ctx.stroke();
 
         const pulse = 0.5 + Math.sin(now / 300) * 0.3;
@@ -1048,11 +1321,10 @@ export const MazeCanvas: React.FC<MazeCanvasProps> = ({
           ctx.font = `bold ${fontSize}px FontGame`;
         }
 
-        ctx.fillStyle = '#000000';
-        ctx.font = `bold ${fontSize}px FontGame`;
-        ctx.fillText(answerText, textX + 1, textY + 1, maxTextWidth);
-
-        ctx.fillStyle = '#ffffff';
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#f8e9cb';
+        ctx.strokeText(answerText, textX, textY, maxTextWidth);
+        ctx.fillStyle = '#60452d';
         ctx.fillText(answerText, textX, textY, maxTextWidth);
         ctx.restore();
       });
@@ -1062,52 +1334,40 @@ export const MazeCanvas: React.FC<MazeCanvasProps> = ({
       // Flashing effect during invincibility
       if (!isInvincible || Math.floor(player.invincibleFrames / 5) % 2 === 0) {
 
-        // Select the correct image based on direction
-        let currentImg = robotDownRef.current; // Default to facing camera
-        let flipHorizontal = false;
-
-        if (player.facingDir === 'up') {
-          currentImg = robotUpRef.current;
-        } else if (player.facingDir === 'down') {
-          currentImg = robotDownRef.current;
-        } else if (player.facingDir === 'left') {
-          currentImg = robotSideRef.current;
-          flipHorizontal = true; // Side image faces right by default
-        } else if (player.facingDir === 'right') {
-          currentImg = robotSideRef.current;
-        }
-
-        // Fallback to original image if directional ones didn't load
-        if (!currentImg) currentImg = robotImageRef.current;
+        const facing = player.facingDir as FacingDirection;
+        const frames = CHARACTER_FRAMES[facing];
+        const frameSrc = frames[player.isMoving ? player.walkFrame + 1 : 0];
+        const selectedSrc = characterImagesRef.current[frameSrc] ? frameSrc : frames[0];
+        const currentImg = characterImagesRef.current[selectedSrc];
 
         if (currentImg) {
+          const [sourceLeft, sourceTop, sourceRight, sourceBottom] = CHARACTER_ALPHA_BOUNDS[selectedSrc];
+          const spriteHeight = 36;
+          const sourceWidth = sourceRight - sourceLeft;
+          const sourceHeight = sourceBottom - sourceTop;
+          const spriteWidth = sourceWidth * (spriteHeight / sourceHeight);
+
           ctx.save();
           ctx.translate(player.x, player.y);
           if (stretchRatio !== 1) {
             ctx.scale(1 / stretchRatio, 1);
           }
-          ctx.shadowColor = '#00f0ff';
-          ctx.shadowBlur = isInvincible ? 15 : 6;
-          const size = 26; // Fits nicely in 32x32 cell
-
-          if (flipHorizontal) {
-            ctx.scale(-1, 1);
-            ctx.drawImage(
-              currentImg,
-              -size / 2,
-              -size / 2,
-              size,
-              size
-            );
-          } else {
-            ctx.drawImage(
-              currentImg,
-              -size / 2,
-              -size / 2,
-              size,
-              size
-            );
-          }
+          ctx.fillStyle = 'rgba(92, 63, 35, 0.22)';
+          ctx.beginPath();
+          ctx.ellipse(0, cellSize / 2 - 1, spriteWidth * 0.43, 3, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = isInvincible ? 0.9 : 1;
+          ctx.drawImage(
+            currentImg,
+            sourceLeft,
+            sourceTop,
+            sourceWidth,
+            sourceHeight,
+            -spriteWidth / 2,
+            cellSize / 2 - spriteHeight,
+            spriteWidth,
+            spriteHeight
+          );
           ctx.restore();
         } else {
           ctx.save();
@@ -1123,12 +1383,12 @@ export const MazeCanvas: React.FC<MazeCanvasProps> = ({
         }
       }
 
-      // 5. Draw Monsters (animated ghost with wavy skirt)
+      // 5. Draw desert beetle guardians, retaining the existing enemy positions.
       const frame = frameCountRef.current;
       monsters.forEach((monster) => {
         const mx = monster.x;
         const my = monster.y;
-        const waveOffset = Math.sin(frame * 0.15) * 2; // Animate skirt wave
+        const legSwing = Math.sin(frame * 0.15) * 1.5;
 
         ctx.save();
         ctx.translate(mx, my);
@@ -1137,36 +1397,44 @@ export const MazeCanvas: React.FC<MazeCanvasProps> = ({
         }
         ctx.translate(-mx, -my);
 
-        // Draw ghost dome body
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#795235';
+        for (const side of [-1, 1]) {
+          for (const leg of [-1, 0, 1]) {
+            const legY = my + leg * 4;
+            ctx.beginPath();
+            ctx.moveTo(mx + side * 6, legY);
+            ctx.lineTo(mx + side * (10 + legSwing * side), legY + leg * 2);
+            ctx.stroke();
+          }
+        }
+
+        ctx.fillStyle = '#795235';
         ctx.beginPath();
-        ctx.arc(mx, my - 2, 10, Math.PI, 0, false); // top dome
-        ctx.lineTo(mx + 10, my + 10);
+        ctx.ellipse(mx, my + 1, 10, 8, 0, 0, Math.PI * 2);
+        ctx.fill();
 
-        // Animated wavy bottom skirt
-        ctx.lineTo(mx + 7, my + 7 + waveOffset);
-        ctx.lineTo(mx + 4, my + 10);
-        ctx.lineTo(mx + 1, my + 7 - waveOffset);
-        ctx.lineTo(mx - 2, my + 10);
-        ctx.lineTo(mx - 5, my + 7 + waveOffset);
-        ctx.lineTo(mx - 8, my + 10);
-        ctx.lineTo(mx - 10, my + 7 - waveOffset);
-
-        ctx.closePath();
         ctx.fillStyle = monster.color;
-        ctx.shadowColor = monster.color;
-        ctx.shadowBlur = 10;
-        ctx.fill();
-        ctx.shadowBlur = 0;
-
-        // Draw white eyes
-        ctx.fillStyle = '#ffffff';
         ctx.beginPath();
-        ctx.arc(mx - 4, my - 2, 3, 0, Math.PI * 2);
-        ctx.arc(mx + 4, my - 2, 3, 0, Math.PI * 2);
+        ctx.ellipse(mx, my - 1, 8, 7, 0, Math.PI, Math.PI * 2);
+        ctx.lineTo(mx + 8, my + 2);
+        ctx.quadraticCurveTo(mx, my + 6, mx - 8, my + 2);
+        ctx.closePath();
         ctx.fill();
 
-        // Draw pupils looking in movement direction (using lastDir)
-        ctx.fillStyle = '#1a1a6e';
+        ctx.strokeStyle = 'rgba(248, 233, 203, 0.72)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(mx, my, 5, Math.PI + 0.3, Math.PI * 2 - 0.3);
+        ctx.stroke();
+
+        ctx.fillStyle = '#f8e9cb';
+        ctx.beginPath();
+        ctx.arc(mx - 3, my - 1, 2, 0, Math.PI * 2);
+        ctx.arc(mx + 3, my - 1, 2, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#423326';
         let pupilDx = 0;
         let pupilDy = 0;
 
@@ -1178,8 +1446,8 @@ export const MazeCanvas: React.FC<MazeCanvasProps> = ({
         else if (mDir === 'right') pupilDx = 1.5;
 
         ctx.beginPath();
-        ctx.arc(mx - 4 + pupilDx, my - 2 + pupilDy, 1.5, 0, Math.PI * 2);
-        ctx.arc(mx + 4 + pupilDx, my - 2 + pupilDy, 1.5, 0, Math.PI * 2);
+        ctx.arc(mx - 3 + pupilDx * 0.5, my - 1 + pupilDy * 0.5, 1, 0, Math.PI * 2);
+        ctx.arc(mx + 3 + pupilDx * 0.5, my - 1 + pupilDy * 0.5, 1, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
       });
@@ -1188,35 +1456,7 @@ export const MazeCanvas: React.FC<MazeCanvasProps> = ({
     };
 
     const runFrame = () => {
-      if (celebrationRef.current) {
-        celebrationRef.current.progress++;
-        const p = celebrationRef.current.progress;
-        const maxFrames = 75; // 1.25 seconds of celebration zoom
-        const ratio = Math.min(p / maxFrames, 1);
-
-        // Easing cubic out
-        const easeRatio = 1 - Math.pow(1 - ratio, 3);
-        const gameplayZoom = gameplayZoomRef.current;
-        const targetZoomX = gameplayZoom.zoomX * 2.2;
-        const targetZoomY = gameplayZoom.zoomY * 2.2;
-        cameraRef.current.zoomX = gameplayZoom.zoomX + (targetZoomX - gameplayZoom.zoomX) * easeRatio;
-        cameraRef.current.zoomY = gameplayZoom.zoomY + (targetZoomY - gameplayZoom.zoomY) * easeRatio;
-
-        // Pull camera heavily towards player during zoom
-        const player = playerRef.current;
-        cameraRef.current.x += (player.x - cameraRef.current.x) * 0.15;
-        cameraRef.current.y += (player.y - cameraRef.current.y) * 0.15;
-
-        if (p >= maxFrames) {
-          celebrationRef.current = null;
-          cameraRef.current.zoomX = gameplayZoom.zoomX;
-          cameraRef.current.zoomY = gameplayZoom.zoomY;
-          onCorrect();
-        }
-      } else {
-        updateGame();
-      }
-
+      updateGame();
       drawGame();
       animationId = requestAnimationFrame(runFrame);
     };
@@ -1268,14 +1508,14 @@ export const MazeCanvas: React.FC<MazeCanvasProps> = ({
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
       style={{ touchAction: 'none' }}
-      className="maze-canvas-shell relative flex justify-center items-center rounded-2xl overflow-hidden shadow-[0_0_40px_rgba(0,240,255,0.15)] bg-[#030712] border-2 border-[#1e3a8a]/50 touch-none select-none w-full h-full cursor-crosshair"
+      className="maze-canvas-shell relative flex justify-center items-center rounded-2xl overflow-hidden shadow-[0_12px_36px_rgba(107,73,39,0.25)] bg-[#e8c994] border-2 border-[#b98149] touch-none select-none w-full h-full cursor-crosshair"
     >
       <canvas
         ref={canvasRef}
         width={19 * cellSize * 2}
         height={19 * cellSize * 2}
         className="block w-full h-full"
-        style={{ imageRendering: 'pixelated' }}
+        style={{ imageRendering: 'auto' }}
       />
     </div>
   );

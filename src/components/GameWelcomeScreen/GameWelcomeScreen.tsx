@@ -1,19 +1,11 @@
 import React from 'react';
 import './GameWelcomeScreen.css';
+import { DoorOpen, Play } from 'lucide-react';
 import { handleExitSite as defaultExitSite } from '../../utils/navigation';
 
 interface GameWelcomeScreenProps {
   backgroundImage?: string;
-  statsBgImage: string;
-  statLeftIcon?: string;
-  statLeftAlt?: string;
-  statLeftValue?: string | number;
-  statRightValue?: string | number;
-  statRightIcon?: string;
-  statRightAlt?: string;
   descriptionImage: string;
-  startButtonImage: string;
-  exitButtonImage: string;
   onStart: () => void;
   onExit?: () => void;
   isLoading?: boolean;
@@ -22,16 +14,7 @@ interface GameWelcomeScreenProps {
 
 export default function GameWelcomeScreen({
   backgroundImage,
-  statsBgImage,
-  statLeftIcon,
-  statLeftAlt = 'عدد الأسئلة',
-  statLeftValue,
-  statRightValue,
-  statRightIcon,
-  statRightAlt = 'النقاط',
   descriptionImage,
-  startButtonImage,
-  exitButtonImage,
   onStart,
   onExit,
   isLoading = false,
@@ -41,34 +24,12 @@ export default function GameWelcomeScreen({
 
   const startDisabled = isLoading || !isReady;
 
-  const handleArtLoad = (event: React.SyntheticEvent<HTMLImageElement>) => {
-    const image = event.currentTarget;
-    const stage = image.closest<HTMLElement>('.gws-stage');
-    if (stage && image.naturalWidth && image.naturalHeight) {
-      stage.style.setProperty('--gws-art-ratio', String(image.naturalWidth / image.naturalHeight));
-    }
-  };
-
   return (
     <div
       className="gws-screen"
       dir="rtl"
       style={backgroundImage ? { backgroundImage: `url(${backgroundImage})` } : undefined}
     >
-      <header className="gws-header" aria-label="إحصاءات اللعبة">
-        <div className="gws-stats-bg" style={{ backgroundImage: `url(${statsBgImage})` }}>
-          {statLeftIcon && <img src={statLeftIcon} alt={statLeftAlt} className="gws-stat-icon" />}
-          {statLeftValue !== undefined && <span className="gws-stat-text">{statLeftValue}</span>}
-          {statRightValue !== undefined && (
-            <>
-              <span className="gws-stat-equals" aria-hidden="true">=</span>
-              <span className="gws-stat-text gws-stat-text--yellow">{statRightValue}</span>
-            </>
-          )}
-          {statRightIcon && <img src={statRightIcon} alt={statRightAlt} className="gws-stat-icon" />}
-        </div>
-      </header>
-
       <main className="gws-main">
         <div className="gws-stage">
           <div className="gws-body">
@@ -76,23 +37,24 @@ export default function GameWelcomeScreen({
               className="gws-description-art"
               src={descriptionImage}
               alt="شرح طريقة اللعب"
-              onLoad={handleArtLoad}
             />
           </div>
 
           <footer className="gws-footer">
             <div className="gws-footer-buttons">
-              <button className="gws-img-btn" type="button" onClick={handleExit} aria-label="خروج">
-                <img src={exitButtonImage} alt="" />
+              <button className="gws-button gws-button--exit" type="button" onClick={handleExit}>
+                <DoorOpen aria-hidden="true" />
+                <span>خروج</span>
               </button>
               <button
-                className="gws-start-btn"
+                className="gws-button gws-button--start"
                 type="button"
-                style={{ backgroundImage: `url(${startButtonImage})` }}
                 onClick={onStart}
                 disabled={startDisabled}
-                aria-label={isLoading ? 'جارٍ التحميل' : 'ابدأ اللعبة'}
-              />
+              >
+                <Play aria-hidden="true" />
+                <span>{isLoading ? 'جارٍ التحميل' : 'ابدأ اللعبة'}</span>
+              </button>
             </div>
           </footer>
         </div>
