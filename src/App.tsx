@@ -66,8 +66,8 @@ function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Session State
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  // Session / Token State
+  const latestTokenRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (apiQuestions.length > 0) {
@@ -79,148 +79,59 @@ function App() {
       });
     }
   }, [apiQuestions]);
-  const [sessionToken, setSessionToken] = useState<string | null>(null);
-  const latestTokenRef = useRef<string | null>(null);
 
-  const refreshPromiseRef = useRef<Promise<string | null> | null>(null);
-  const refreshEndpointRef = useRef<string | null>(null);
-
-  const doRefresh = async (): Promise<string | null> => {
-    try {
-      const baseUrl = import.meta.env.VITE_API_BASE_URL;
-      const endpoints = ['/api/v1/student/refresh', '/api/v1/auth/refresh'];
-      // Use only the endpoint that worked last time to avoid duplicate calls
-      const order = refreshEndpointRef.current ? [refreshEndpointRef.current] : endpoints;
-
-      let refreshRes: Response | null = null;
-      let usedEndpoint: string | null = null;
-      for (const ep of order) {
-        refreshRes = await fetch(`${baseUrl}${ep}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: "{}",
-          credentials: 'include',
-        });
-        usedEndpoint = ep;
-        if (refreshRes.ok) break;
-      }
-
-      if (refreshRes && refreshRes.ok) {
-        const refreshData = await refreshRes.json();
-        const newToken = refreshData?.data?.accessToken || refreshData?.data?.token || refreshData?.accessToken || refreshData?.token;
-        if (newToken) {
-          console.log("Token refreshed successfully.");
-          refreshEndpointRef.current = usedEndpoint;
-          setSessionToken(newToken);
-          latestTokenRef.current = newToken;
-          return newToken;
-        }
-      } else {
-        refreshEndpointRef.current = null;
-        console.error("Token refresh failed with status", refreshRes?.status);
-      }
-    } catch (err) {
-      console.error("Error during token refresh", err);
-    }
-    return null;
-  };
-
-  // Concurrent callers (StrictMode double effects, parallel 401s) share one request
-  const refreshAccessToken = () => {
-    if (!refreshPromiseRef.current) {
-      refreshPromiseRef.current = doRefresh().finally(() => {
-        refreshPromiseRef.current = null;
-      });
-    }
-    return refreshPromiseRef.current;
+  const getUrlToken = () => {
+    if (typeof window === 'undefined') return null;
+    const params = new URLSearchParams(window.location.search);
+    return params.get('token') || params.get('accesstoken');
   };
 
   const apiFetch = async (url: string, options: RequestInit = {}) => {
-    let currentToken = latestTokenRef.current;
-    if (!currentToken) {
-      currentToken = await refreshAccessToken();
-    }
-    
-    const fetchOptions = { ...options };
-    if (currentToken) {
-      fetchOptions.headers = { ...(fetchOptions.headers || {}), Authorization: `Bearer ${currentToken}` };
+    const currentToken = latestTokenRef.current || getUrlToken();
+    const headers = new Headers(options.headers);
+    if (currentToken && !headers.has('Authorization')) {
+      headers.set('Authorization', `Bearer ${currentToken}`);
     }
 
-    let res = await fetch(url, fetchOptions);
-
-    if (res.status === 401) {
-      console.warn("401 Unauthorized encountered. Attempting to refresh token...");
-      const newToken = await refreshAccessToken();
-      if (newToken) {
-        fetchOptions.headers = { ...(fetchOptions.headers || {}), Authorization: `Bearer ${newToken}` };
-        res = await fetch(url, fetchOptions);
-      } else {
-        setError('تعذر تجديد رمز الدخول.');
-      }
-    }
-    
-    return res;
+    return fetch(url, {
+      ...options,
+      headers,
+    });
   };
   const [answersList, setAnswersList] = useState<any[]>([]);
   const answersRef = useRef<any[]>([]);
   const [questionStartTime, setQuestionStartTime] = useState<number>(0);
   const [victoryData, setVictoryData] = useState<any>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const isSubmittingRef = useRef(false);
-  const submissionIdRef = useRef(0);
-  const [isRestarting, setIsRestarting] = useState(false);
+
+  const getBaseUrl = () => import.meta.env.VITE_API_BASE_URL || 'https://oasis-eduline.onrender.com';
 
   useEffect(() => {
     const fetchQuestions = async () => {
       try {
         const urlParams = new URLSearchParams(window.location.search);
-        const lessonId = urlParams.get('lessonId');
+        const assessmentId = urlParams.get('assessmentID') || urlParams.get('assessmentId') || urlParams.get('lessonId');
         const isDemo = urlParams.get('demo') === 'true';
+        const urlToken = getUrlToken();
 
-        // 1. Check for Lesson ID
-        if (!lessonId && !isDemo) {
-          console.warn('Missing lessonId parameter in URL.');
-          setError('Missing lessonId in URL parameters.');
+        if (urlToken) {
+          latestTokenRef.current = urlToken;
+        }
+
+        // 1. Check for Assessment / Lesson ID
+        if (!assessmentId) {
+          if (isDemo) {
+            setApiQuestions(QUESTIONS);
+          } else {
+            console.warn('Missing assessmentId/lessonId parameter in URL.');
+            setError('عذراً، الرابط غير مكتمل. يرجى التأكد من وجود رقم التقييم ورمز المرور.');
+          }
           setIsLoading(false);
           return;
         }
 
-        if (isDemo && !lessonId) {
-          setApiQuestions(QUESTIONS);
-          setIsLoading(false);
-          return;
-        }
-
-        // 2. Check for Token / Refresh Endpoint Error
-        if (!isDemo) {
-          const token = await refreshAccessToken();
-          if (!token) {
-            console.warn('Failed to obtain authentication token via refresh endpoint.');
-            setError('تعذر الحصول على رمز الدخول.');
-            setIsLoading(false);
-            return;
-          }
-        }
-
-        const baseUrl = import.meta.env.VITE_API_BASE_URL;
-
-        // 3. Create Session
-        try {
-          const sessionRes = await apiFetch(`${baseUrl}/api/v1/student/games/1/sessions?lessonId=${lessonId}`, {
-            method: 'POST',
-          });
-          if (sessionRes.ok) {
-            const sData = await sessionRes.json();
-            if (sData?.data?.id) {
-              setSessionId(sData.data.id);
-            }
-          }
-        } catch (e) {
-          console.error("Failed to create session", e);
-        }
-
-        // 4. Fetch Questions (Check Question Endpoint)
-        const response = await apiFetch(`${baseUrl}/api/v1/student/games/1/questions?lessonId=${lessonId}`);
+        // 2. Fetch Questions from Assessment Game Choice Endpoint
+        const response = await apiFetch(`${getBaseUrl()}/api/v1/student/assessments/${assessmentId}/game/choice`);
 
         if (!response.ok) {
           throw new Error('فشل في جلب البيانات من الخادم.');
@@ -274,9 +185,10 @@ function App() {
               const details = q.choiceDetails || {};
               questionText = details.title || 'بدون سؤال';
               choicesArr = normalizeOptionArray(details.choices);
-              image = details.image || null;
+              image = q.image || details.image || null;
+              audio = q.audioUrl || details.audioUrl || null;
 
-              const correctIndex = details.correctAnswer !== undefined ? details.correctAnswer : 0;
+              const correctIndex = details.correctAnswer !== undefined ? Number(details.correctAnswer) : 0;
               const mappedChoices = choicesArr.map((c: any) => typeof c === 'string' ? c : c?.text).filter((t: any) => typeof t === 'string' && t.trim() !== '');
 
               word = mappedChoices[correctIndex] || 'إجابة';
@@ -287,7 +199,7 @@ function App() {
             distractors = distractors.slice(0, 3);
 
             return {
-              id: q.id || q.questionId || idx,
+              id: q.id || q.questionId || q.choiceDetails?.questionId || idx,
               questionText: questionText,
               image: image,
               audioUrl: audio,
@@ -311,7 +223,6 @@ function App() {
 
   const handleStartGame = () => {
     requestMobileGameplayPresentation();
-    submissionIdRef.current += 1;
     setScore(0);
     setLives(3);
     setCurrentQuestionIndex(0);
@@ -322,42 +233,14 @@ function App() {
     setView('playing');
   };
 
-  // Retry from the results panel: create a brand-new session, then reset everything.
-  const handleRetry = async () => {
-    if (isRestarting) return;
-    setIsRestarting(true);
-
-    // Drop the old (already completed) session so nothing is submitted to it
-    setSessionId(null);
-
-    const lessonId = new URLSearchParams(window.location.search).get('lessonId');
-    if (lessonId) {
-      try {
-        const baseUrl = import.meta.env.VITE_API_BASE_URL;
-        const sessionRes = await apiFetch(`${baseUrl}/api/v1/student/games/1/sessions?lessonId=${lessonId}`, {
-          method: 'POST',
-        });
-        if (sessionRes.ok) {
-          const sData = await sessionRes.json();
-          if (sData?.data?.id) {
-            setSessionId(sData.data.id);
-          }
-        }
-      } catch (e) {
-        console.error("Failed to create session on retry", e);
-      }
-    }
-
-    setIsSubmitting(false);
+  const handleRetry = () => {
     isSubmittingRef.current = false;
     handleStartGame();
-    setIsRestarting(false);
   };
 
-  const submitGameSession = async (finalAnswers: any[], showResultsImmediately = false) => {
+  const submitGameSession = (finalAnswers: any[]) => {
     if (isSubmittingRef.current) return;
     isSubmittingRef.current = true;
-    const submissionId = ++submissionIdRef.current;
 
     // Ensure every question that was not solved is calculated as wrong too
     const answeredQIds = new Set(finalAnswers.map((a: any) => a.questionId));
@@ -387,49 +270,8 @@ function App() {
 
     answersRef.current = answersToSend;
     setAnswersList(answersToSend);
-
-    if (!sessionId || !sessionToken) {
-      setView('victory');
-      isSubmittingRef.current = false;
-      return;
-    }
-
-    if (showResultsImmediately) setView('victory');
-    setIsSubmitting(true);
-
-    try {
-      const baseUrl = import.meta.env.VITE_API_BASE_URL;
-
-      if (answersToSend.length > 0) {
-        await apiFetch(`${baseUrl}/api/v1/student/games/sessions/${sessionId}/submit-answers`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ answers: answersToSend })
-        });
-      }
-
-      // Complete Session
-      const completeRes = await apiFetch(`${baseUrl}/api/v1/student/games/sessions/${sessionId}/complete`, {
-        method: 'POST',
-      });
-
-      if (completeRes.ok) {
-        const cData = await completeRes.json();
-        if (cData?.data && submissionIdRef.current === submissionId) {
-          setVictoryData(cData.data);
-        }
-      }
-    } catch (e) {
-      console.error("Error submitting session:", e);
-    } finally {
-      if (submissionIdRef.current === submissionId) {
-        setIsSubmitting(false);
-        isSubmittingRef.current = false;
-        if (!showResultsImmediately) setView('victory');
-      }
-    }
+    setView('victory');
+    isSubmittingRef.current = false;
   };
 
   const handleCorrectAnswer = () => {
@@ -453,7 +295,7 @@ function App() {
       setCurrentQuestionIndex(currentQuestionIndex + 1);
       setQuestionStartTime(Date.now());
     } else {
-      submitGameSession(newAnswers, true);
+      submitGameSession(newAnswers);
     }
 
     setScore((prev) => prev + 10);
@@ -524,12 +366,6 @@ function App() {
           onLoseLife={handleLoseLife}
           onBackToWelcome={handleExitSite}
         />
-      )}
-
-      {isSubmitting && view !== 'victory' && (
-        <div className="submitting-overlay" aria-busy="true">
-          <div className="submitting-spinner" />
-        </div>
       )}
 
       {view === 'victory' && (() => {
